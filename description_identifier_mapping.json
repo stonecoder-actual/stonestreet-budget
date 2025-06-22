@@ -21,5 +21,8 @@
     "transfer to savings -4383": "Savings",
     "transfer to savings -1795": "Savings",
     "target": "Other",
-    "transfer to savings -3068": "Savings"
+    "transfer to savings -3068": "Savings",
+    "transfer from venmo": "Ignore",
+    "transfer to venmo": "Ignore",
+    "transfer to checking -6718": "Ignore"
 }
