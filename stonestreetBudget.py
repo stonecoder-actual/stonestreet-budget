@@ -1,6 +1,6 @@
 import pandas as pd
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import json
 import os
 from datetime import datetime
@@ -50,19 +50,30 @@ def add_custom_identifier(transactions_df):
 class DateFilterGUI:
     def __init__(self, master):
         self.master = master
-        self.master.title("Select Month and Year")
-        self.master.geometry("300x200")
+        self.master.title("Select CSV File and Date")
+        self.master.geometry("400x300")
         
         self.selected_month = None
         self.selected_year = None
+        self.selected_file = None
         self.proceed = False
         
         self.create_widgets()
         
     def create_widgets(self):
         # Title label
-        title_label = ttk.Label(self.master, text="Select Month and Year to Filter Transactions", font=("Arial", 12))
+        title_label = ttk.Label(self.master, text="Select CSV File and Date Range", font=("Arial", 12))
         title_label.pack(pady=10)
+
+        # File selection frame
+        file_frame = ttk.Frame(self.master)
+        file_frame.pack(pady=10)
+        
+        self.file_label = ttk.Label(file_frame, text="No file selected", width=40)
+        self.file_label.pack(side=tk.LEFT, padx=5)
+        
+        browse_button = ttk.Button(file_frame, text="Browse", command=self.browse_file)
+        browse_button.pack(side=tk.LEFT, padx=5)
         
         # Month selection
         month_frame = ttk.Frame(self.master)
@@ -101,6 +112,10 @@ class DateFilterGUI:
         cancel_button.pack(side=tk.LEFT, padx=10)
         
     def on_proceed(self):
+        if not self.selected_file:
+            messagebox.showwarning("Warning", "Please select a CSV file first.")
+            return
+            
         if not self.month_var.get() or not self.year_var.get():
             messagebox.showwarning("Warning", "Please select both month and year.")
             return
@@ -114,11 +129,28 @@ class DateFilterGUI:
         self.proceed = False
         self.master.destroy()
 
+    def browse_file(self):
+        global csv_file
+        filename = filedialog.askopenfilename(
+            title="Select CSV File",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if filename:
+            self.selected_file = filename
+            csv_file = filename  # Update the global csv_file variable
+            # Show only the filename, not the full path
+            display_name = os.path.basename(filename)
+            self.file_label.config(text=display_name)
+
 def filter_transactions_by_date(month, year):
     """
-    Filter transactions in phatstacks.csv to keep only those in the specified month and year.
+    Filter transactions in the selected CSV file to keep only those in the specified month and year.
     """
     try:
+        if not os.path.exists(csv_file):
+            messagebox.showerror("Error", "Please select a CSV file first.")
+            return 0, 0
+            
         # Read the CSV file
         df = pd.read_csv(csv_file)
         
@@ -162,14 +194,22 @@ class BudgetTrackerGUI:
                 import csv
                 file_exists = os.path.exists("processed_transactions.csv")
                 with open("processed_transactions.csv", mode='a', newline='', encoding='utf-8') as f:
-                    writer = csv.DictWriter(f, fieldnames=['Transaction Date', 'Description'])
+                    writer = csv.DictWriter(f, fieldnames=['Transaction Date', 'Description', 'Amount'])
                     if not file_exists:
                         writer.writeheader()
                     for _, row in removed_rows.iterrows():
-                        key = (str(row.get('Transaction Date', '')).strip(), str(row.get('Description', '')).strip())
+                        key = (
+                            str(row.get('Transaction Date', '')).strip(),
+                            str(row.get('Description', '')).strip(),
+                            str(row.get('Amount', '')).strip()
+                        )
                         # Avoid duplicates by checking if key already in processed_transactions
                         if key not in self.processed_transactions:
-                            writer.writerow({'Transaction Date': row.get('Transaction Date', ''), 'Description': row.get('Description', '')})
+                            writer.writerow({
+                                'Transaction Date': row.get('Transaction Date', ''),
+                                'Description': row.get('Description', ''),
+                                'Amount': row.get('Amount', '')
+                            })
                             self.processed_transactions.add(key)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save removed transactions to processed file: {e}")
@@ -191,6 +231,30 @@ class BudgetTrackerGUI:
         self.apply_mappings()
         # Save updated transactions with assigned identifiers to CSV on first load
         self.transactions.to_csv(csv_file, index=False)
+
+        # Add all processed transactions (with Custom Identifier) to processed_transactions.csv
+        try:
+            import csv
+            file_exists = os.path.exists("processed_transactions.csv")
+            with open("processed_transactions.csv", mode='a', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=['Transaction Date', 'Description', 'Amount'])
+                if not file_exists:
+                    writer.writeheader()
+                for _, row in self.transactions.iterrows():
+                    txn_key = (
+                        str(row.get('Transaction Date', '')).strip(),
+                        str(row.get('Description', '')).strip(),
+                        str(row.get('Amount', '')).strip()
+                    )
+                    if row.get('Custom Identifier', '') and txn_key not in self.processed_transactions:
+                        writer.writerow({
+                            'Transaction Date': row.get('Transaction Date', ''),
+                            'Description': row.get('Description', ''),
+                            'Amount': row.get('Amount', '')
+                        })
+                        self.processed_transactions.add(txn_key)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save processed transactions during initialization: {e}")
 
         self.current_index = 0
         self.hide_processed = tk.BooleanVar(value=False)
@@ -262,7 +326,7 @@ class BudgetTrackerGUI:
         ttk.Label(self.master, text="Custom Identifier:").grid(row=row, column=0, sticky='e', padx=5, pady=5)
         self.identifier_var = tk.StringVar()
         self.identifier_combo = ttk.Combobox(self.master, textvariable=self.identifier_var)
-        self.identifier_combo['values'] = sorted(['Rent', 'Phone', 'Philo', 'Spotify', 'Peacock', 'Youtube', 'Canva', 'Microsoft Office', 'Xbox', 'Adobe', 'Fuel', 'Car wash', 'USAA', 'Groceries', 'Vitamins', 'Coffee', 'LMNT', 'Toothpaste', 'Amazon', 'Eating out', 'Other', 'Burn Bootcamp', 'Planet Fitness', 'National Academy', 'Income', 'Savings'])
+        self.identifier_combo['values'] = sorted(['Ignore', 'Rent', 'Phone', 'Philo', 'Spotify', 'Peacock', 'Youtube', 'Canva', 'Microsoft Office', 'Xbox', 'Adobe', 'Fuel', 'Car wash', 'USAA', 'Groceries', 'Vitamins', 'Coffee', 'LMNT', 'Toothpaste', 'Amazon', 'Eating out', 'Other', 'Burn Bootcamp', 'Planet Fitness', 'National Academy', 'Income', 'Savings'])
         self.identifier_combo.grid(row=row, column=1, sticky='w', padx=5, pady=5)
         row += 1
 
@@ -360,19 +424,29 @@ class BudgetTrackerGUI:
     def save_current_identifier(self):
         if 0 <= self.current_index < len(self.filtered_transactions):
             row = self.filtered_transactions.iloc[self.current_index]
-            txn_key = (str(row.get('Transaction Date', '')).strip(), str(row.get('Description', '')).strip())
+            txn_key = (
+                str(row.get('Transaction Date', '')).strip(),
+                str(row.get('Description', '')).strip(),
+                str(row.get('Amount', '')).strip()
+            )
             # Always update the Custom Identifier
             # Need to update the original transactions DataFrame as well
-            # Normalize description strings for matching
+            # Normalize description strings for matching and include Amount
             original_index = self.transactions.index[
                 (self.transactions['Transaction Date'].astype(str).str.strip() == str(row['Transaction Date']).strip()) &
-                (self.transactions['Description'].astype(str).str.strip().str.lower() == str(row['Description']).strip().lower())
+                (self.transactions['Description'].astype(str).str.strip().str.lower() == str(row['Description']).strip().lower()) &
+                (self.transactions['Amount'].astype(str).str.strip() == str(row['Amount']).strip())
             ].tolist()
             if original_index:
-                print(f"Saving Custom Identifier '{self.identifier_var.get()}' for transaction with description '{row['Description']}'")  # Debug log
-                self.transactions.at[original_index[0], 'Custom Identifier'] = self.identifier_var.get()
+                selected_identifier = self.identifier_var.get()
+                print(f"Saving Custom Identifier '{selected_identifier}' for transaction with description '{row['Description']}' and amount '{row['Amount']}'")  # Debug log
+                # If "Ignore" is selected, save empty string as Custom Identifier
+                if selected_identifier == "Ignore":
+                    self.transactions.at[original_index[0], 'Custom Identifier'] = ''
+                else:
+                    self.transactions.at[original_index[0], 'Custom Identifier'] = selected_identifier
             else:
-                print(f"No matching transaction found for description '{row['Description']}'")  # Debug log
+                print(f"No matching transaction found for description '{row['Description']}' and amount '{row['Amount']}'")  # Debug log
             # Mark transaction as processed if not already
             if txn_key not in self.processed_transactions:
                 self.save_processed_transaction(*txn_key)
@@ -412,23 +486,31 @@ class BudgetTrackerGUI:
             try:
                 df = pd.read_csv("processed_transactions.csv")
                 for _, row in df.iterrows():
-                    key = (str(row.get('Transaction Date', '')), str(row.get('Description', '')))
+                    key = (
+                        str(row.get('Transaction Date', '')),
+                        str(row.get('Description', '')),
+                        str(row.get('Amount', ''))
+                    )
                     self.processed_transactions.add(key)
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to load processed transactions: {e}")
 
-    def save_processed_transaction(self, transaction_date, description):
+    def save_processed_transaction(self, transaction_date, description, amount):
         try:
             # Append to processed_transactions.csv
             import csv
             file_exists = os.path.exists("processed_transactions.csv")
             with open("processed_transactions.csv", mode='a', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=['Transaction Date', 'Description'])
+                writer = csv.DictWriter(f, fieldnames=['Transaction Date', 'Description', 'Amount'])
                 if not file_exists:
                     writer.writeheader()
-                writer.writerow({'Transaction Date': transaction_date, 'Description': description})
-            # Add to in-memory set
-            self.processed_transactions.add((transaction_date, description))
+                writer.writerow({
+                    'Transaction Date': transaction_date,
+                    'Description': description,
+                    'Amount': amount
+                })
+            # Add to in-memory set with amount to uniquely identify the transaction
+            self.processed_transactions.add((transaction_date, description, str(amount)))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save processed transaction: {e}")
 
@@ -455,9 +537,13 @@ def main():
     filter_app = DateFilterGUI(filter_root)
     filter_root.mainloop()
     
-    # Check if user proceeded with date selection
+    # Check if user proceeded with file selection and date selection
     if not filter_app.proceed:
-        print("Date filtering cancelled. Exiting.")
+        print("Operation cancelled. Exiting.")
+        return
+        
+    if not filter_app.selected_file:
+        messagebox.showwarning("Warning", "Please select a CSV file first.")
         return
     
     # Filter transactions by selected month and year
