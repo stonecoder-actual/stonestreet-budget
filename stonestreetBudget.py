@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import json
 import os
+from datetime import datetime
 
 csv_file = "phatstacks.csv"
 mapping_file = "description_identifier_mapping.json"
@@ -46,6 +47,99 @@ def add_custom_identifier(transactions_df):
     transactions_df['Custom Identifier'] = transactions_df.apply(identifier, axis=1)
     return transactions_df
 
+class DateFilterGUI:
+    def __init__(self, master):
+        self.master = master
+        self.master.title("Select Month and Year")
+        self.master.geometry("300x200")
+        
+        self.selected_month = None
+        self.selected_year = None
+        self.proceed = False
+        
+        self.create_widgets()
+        
+    def create_widgets(self):
+        # Title label
+        title_label = ttk.Label(self.master, text="Select Month and Year to Filter Transactions", font=("Arial", 12))
+        title_label.pack(pady=10)
+        
+        # Month selection
+        month_frame = ttk.Frame(self.master)
+        month_frame.pack(pady=5)
+        
+        ttk.Label(month_frame, text="Month:").pack(side=tk.LEFT, padx=5)
+        self.month_var = tk.StringVar()
+        month_combo = ttk.Combobox(month_frame, textvariable=self.month_var, state="readonly")
+        month_combo['values'] = [
+            "01 - January", "02 - February", "03 - March", "04 - April",
+            "05 - May", "06 - June", "07 - July", "08 - August",
+            "09 - September", "10 - October", "11 - November", "12 - December"
+        ]
+        month_combo.pack(side=tk.LEFT, padx=5)
+        
+        # Year selection
+        year_frame = ttk.Frame(self.master)
+        year_frame.pack(pady=5)
+        
+        ttk.Label(year_frame, text="Year:").pack(side=tk.LEFT, padx=5)
+        self.year_var = tk.StringVar()
+        year_combo = ttk.Combobox(year_frame, textvariable=self.year_var, state="readonly")
+        current_year = datetime.now().year
+        year_combo['values'] = [str(year) for year in range(current_year - 5, current_year + 2)]
+        year_combo.set(str(current_year))
+        year_combo.pack(side=tk.LEFT, padx=5)
+        
+        # Buttons
+        button_frame = ttk.Frame(self.master)
+        button_frame.pack(pady=20)
+        
+        proceed_button = ttk.Button(button_frame, text="Proceed", command=self.on_proceed)
+        proceed_button.pack(side=tk.LEFT, padx=10)
+        
+        cancel_button = ttk.Button(button_frame, text="Cancel", command=self.on_cancel)
+        cancel_button.pack(side=tk.LEFT, padx=10)
+        
+    def on_proceed(self):
+        if not self.month_var.get() or not self.year_var.get():
+            messagebox.showwarning("Warning", "Please select both month and year.")
+            return
+            
+        self.selected_month = self.month_var.get()[:2]  # Extract month number
+        self.selected_year = self.year_var.get()
+        self.proceed = True
+        self.master.destroy()
+        
+    def on_cancel(self):
+        self.proceed = False
+        self.master.destroy()
+
+def filter_transactions_by_date(month, year):
+    """
+    Filter transactions in phatstacks.csv to keep only those in the specified month and year.
+    """
+    try:
+        # Read the CSV file
+        df = pd.read_csv(csv_file)
+        
+        # Convert Transaction Date to datetime
+        df['Transaction Date'] = pd.to_datetime(df['Transaction Date'], errors='coerce')
+        
+        # Filter by month and year
+        filtered_df = df[
+            (df['Transaction Date'].dt.month == int(month)) & 
+            (df['Transaction Date'].dt.year == int(year))
+        ]
+        
+        # Save filtered transactions back to CSV
+        filtered_df.to_csv(csv_file, index=False)
+        
+        return len(filtered_df), len(df)
+        
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to filter transactions: {e}")
+        return 0, 0
+
 class BudgetTrackerGUI:
     def __init__(self, master):
         self.master = master
@@ -60,7 +154,25 @@ class BudgetTrackerGUI:
         # Load transactions
         self.transactions = pd.read_csv(csv_file)
         # Remove rows with Description "#NAME?"
+        removed_rows = self.transactions[self.transactions['Description'] == '#NAME?']
         self.transactions = self.transactions[self.transactions['Description'] != '#NAME?']
+        # Save removed rows to processed_transactions.csv
+        if not removed_rows.empty:
+            try:
+                import csv
+                file_exists = os.path.exists("processed_transactions.csv")
+                with open("processed_transactions.csv", mode='a', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=['Transaction Date', 'Description'])
+                    if not file_exists:
+                        writer.writeheader()
+                    for _, row in removed_rows.iterrows():
+                        key = (str(row.get('Transaction Date', '')).strip(), str(row.get('Description', '')).strip())
+                        # Avoid duplicates by checking if key already in processed_transactions
+                        if key not in self.processed_transactions:
+                            writer.writerow({'Transaction Date': row.get('Transaction Date', ''), 'Description': row.get('Description', '')})
+                            self.processed_transactions.add(key)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to save removed transactions to processed file: {e}")
         # Keep only relevant columns
         relevant_columns = ['Transaction Date', 'Amount', 'Credit Debit Indicator', 'type', 'Description', 'Category']
         # Add 'Custom Identifier' if present or create empty
@@ -79,8 +191,6 @@ class BudgetTrackerGUI:
         self.apply_mappings()
         # Save updated transactions with assigned identifiers to CSV on first load
         self.transactions.to_csv(csv_file, index=False)
-        # Remove filtering to keep all rows including those with Custom Identifiers
-        # self.transactions = self.transactions[self.transactions['Custom Identifier'].isnull() | (self.transactions['Custom Identifier'] == '')].reset_index(drop=True)
 
         self.current_index = 0
         self.hide_processed = tk.BooleanVar(value=False)
@@ -88,6 +198,7 @@ class BudgetTrackerGUI:
 
         # Create UI elements
         self.create_widgets()
+        self.update_transaction_counter()
         self.display_transaction()
 
     def load_mappings(self):
@@ -155,14 +266,17 @@ class BudgetTrackerGUI:
         self.identifier_combo.grid(row=row, column=1, sticky='w', padx=5, pady=5)
         row += 1
 
+        # Transaction counter label
+        self.transaction_counter_label = ttk.Label(self.master, text="")
+        self.transaction_counter_label.grid(row=row, column=0, columnspan=2, pady=5)
+        row += 1
+
         # Hide processed transactions radio button
         self.hide_processed_radio = ttk.Checkbutton(self.master, text="Hide Processed Transactions", variable=self.hide_processed, command=self.toggle_hide_processed)
         self.hide_processed_radio.grid(row=row, column=0, columnspan=2, pady=5)
         row += 1
 
         # Add mapping UI elements
-        # Removed the description input and extra identifier combobox as per user request
-
         self.add_mapping_button = ttk.Button(self.master, text="Add Mapping", command=self.add_mapping)
         self.add_mapping_button.grid(row=row, column=0, columnspan=2, pady=5)
         row += 1
@@ -173,10 +287,6 @@ class BudgetTrackerGUI:
 
         self.next_button = ttk.Button(self.master, text="Next", command=self.next_transaction)
         self.next_button.grid(row=row, column=1, sticky='w', padx=5, pady=10)
-
-        # Remove Save to CSV button as per user request
-        # self.save_button = ttk.Button(self.master, text="Save to CSV", command=self.save_to_csv)
-        # self.save_button.grid(row=row+1, column=0, columnspan=2, pady=10)
 
         # Clear processed transactions button
         self.clear_processed_button = ttk.Button(self.master, text="Clear Processed Transactions", command=self.clear_processed_transactions)
@@ -212,6 +322,7 @@ class BudgetTrackerGUI:
             # Refresh the filtered transactions to only those without custom identifiers
             self.transactions = self.transactions[self.transactions['Custom Identifier'].isnull() | (self.transactions['Custom Identifier'] == '')].reset_index(drop=True)
             self.current_index = 0
+            self.update_transaction_counter()
             self.display_transaction()
             messagebox.showinfo("Success", "All custom identifiers cleared.")
         except Exception as e:
@@ -240,18 +351,9 @@ class BudgetTrackerGUI:
             current_id = row.get('Custom Identifier', '')
             self.identifier_var.set(current_id)
 
-            # Disable editing if transaction already processed
-            txn_key = (str(row.get('Transaction Date', '')), str(row.get('Description', '')))
-            # Remove disabling of editing controls to always allow editing
-            # if txn_key in self.processed_transactions:
-            #     self.identifier_combo.config(state='disabled')
-            #     self.add_mapping_button.config(state='disabled')
-            #     self.save_button.config(state='disabled')
-            # else:
+            # Enable editing controls
             self.identifier_combo.config(state='normal')
             self.add_mapping_button.config(state='normal')
-            # Removed reference to save_button as it no longer exists
-            # self.save_button.config(state='normal')
         else:
             messagebox.showinfo("Info", "No more transactions.")
 
@@ -276,19 +378,19 @@ class BudgetTrackerGUI:
                 self.save_processed_transaction(*txn_key)
 
     def next_transaction(self):
-        # Removed auto save on next
         self.save_current_identifier()
         if self.current_index < len(self.filtered_transactions) - 1:
             self.current_index += 1
+            self.update_transaction_counter()
             self.display_transaction()
         else:
             messagebox.showinfo("Info", "This is the last transaction.")
 
     def prev_transaction(self):
-        # Removed auto save on prev
         self.save_current_identifier()
         if self.current_index > 0:
             self.current_index -= 1
+            self.update_transaction_counter()
             self.display_transaction()
         else:
             messagebox.showinfo("Info", "This is the first transaction.")
@@ -339,9 +441,36 @@ class BudgetTrackerGUI:
             # Show all transactions
             self.filtered_transactions = self.transactions.reset_index(drop=True)
         self.current_index = 0
+        self.update_transaction_counter()
         self.display_transaction()
 
+    def update_transaction_counter(self):
+        total = len(self.transactions)
+        remaining = len(self.transactions[self.transactions['Custom Identifier'].isnull() | (self.transactions['Custom Identifier'] == '')])
+        self.transaction_counter_label.config(text=f"Total Transactions: {total} | Remaining without Custom Identifier: {remaining}")
+
 def main():
+    # First show the date filter GUI
+    filter_root = tk.Tk()
+    filter_app = DateFilterGUI(filter_root)
+    filter_root.mainloop()
+    
+    # Check if user proceeded with date selection
+    if not filter_app.proceed:
+        print("Date filtering cancelled. Exiting.")
+        return
+    
+    # Filter transactions by selected month and year
+    filtered_count, total_count = filter_transactions_by_date(filter_app.selected_month, filter_app.selected_year)
+    
+    if filtered_count == 0:
+        messagebox.showinfo("Info", f"No transactions found for {filter_app.month_var.get()} {filter_app.selected_year}.")
+        return
+    
+    messagebox.showinfo("Filtering Complete", 
+                       f"Filtered transactions: {filtered_count} out of {total_count} total transactions kept for {filter_app.month_var.get()} {filter_app.selected_year}.")
+    
+    # Now show the main budget tracker GUI
     root = tk.Tk()
     app = BudgetTrackerGUI(root)
     root.mainloop()
