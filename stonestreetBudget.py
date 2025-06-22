@@ -22,9 +22,16 @@ def add_custom_identifier(transactions_df):
     """
     def identifier(row):
         description = str(row['Description']).lower()
+        category = str(row.get('Category', '')).lower()
         txn_type = str(row['type']).lower()
 
-        # Example logic for custom identifier - user can customize this
+        # Custom logic for specific cases
+        if description == '#name?' and category == 'rent':
+            return 'Rent'
+        elif category == 'personal care':
+            return 'Planet Fitness'
+
+        # Existing example logic for custom identifier - user can customize this
         if 'grocery' in description:
             return 'GROCERY'
         elif 'rent' in description:
@@ -52,6 +59,8 @@ class BudgetTrackerGUI:
 
         # Load transactions
         self.transactions = pd.read_csv(csv_file)
+        # Remove rows with Description "#NAME?"
+        self.transactions = self.transactions[self.transactions['Description'] != '#NAME?']
         # Keep only relevant columns
         relevant_columns = ['Transaction Date', 'Amount', 'Credit Debit Indicator', 'type', 'Description', 'Category']
         # Add 'Custom Identifier' if present or create empty
@@ -121,6 +130,7 @@ class BudgetTrackerGUI:
             description = str(row.get('Description', '')).lower()
             for key, val in self.mappings.items():
                 if key in description:
+                    print(f"Mapping applied: '{key}' -> '{val}' for description '{description}'")  # Debug log
                     self.transactions.at[idx, 'Custom Identifier'] = val
                     break
 
@@ -248,13 +258,19 @@ class BudgetTrackerGUI:
     def save_current_identifier(self):
         if 0 <= self.current_index < len(self.filtered_transactions):
             row = self.filtered_transactions.iloc[self.current_index]
-            txn_key = (str(row.get('Transaction Date', '')), str(row.get('Description', '')))
+            txn_key = (str(row.get('Transaction Date', '')).strip(), str(row.get('Description', '')).strip())
             # Always update the Custom Identifier
             # Need to update the original transactions DataFrame as well
-            original_index = self.transactions.index[self.transactions['Transaction Date'] == row['Transaction Date']]
-            original_index = original_index[self.transactions.loc[original_index, 'Description'] == row['Description']].tolist()
+            # Normalize description strings for matching
+            original_index = self.transactions.index[
+                (self.transactions['Transaction Date'].astype(str).str.strip() == str(row['Transaction Date']).strip()) &
+                (self.transactions['Description'].astype(str).str.strip().str.lower() == str(row['Description']).strip().lower())
+            ].tolist()
             if original_index:
+                print(f"Saving Custom Identifier '{self.identifier_var.get()}' for transaction with description '{row['Description']}'")  # Debug log
                 self.transactions.at[original_index[0], 'Custom Identifier'] = self.identifier_var.get()
+            else:
+                print(f"No matching transaction found for description '{row['Description']}'")  # Debug log
             # Mark transaction as processed if not already
             if txn_key not in self.processed_transactions:
                 self.save_processed_transaction(*txn_key)
@@ -283,6 +299,8 @@ class BudgetTrackerGUI:
             # Save the updated transactions DataFrame back to the CSV file
             self.transactions.to_csv(csv_file, index=False)
             messagebox.showinfo("Success", f"Custom Identifiers saved to '{csv_file}'.")
+            # Close the GUI window after saving
+            self.master.destroy()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save to CSV: {e}")
 
